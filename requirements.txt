@@ -1,0 +1,13 @@
+# Armband side (same as ArmBand/requirements.txt)
+numpy
+pyqt5
+pyqtgraph
+pyserial
+joblib
+scikit-learn>=1.9   # your models were trained with 1.9.0
+PyWavelets
+pyobjc-framework-Quartz; sys_platform == "darwin"
+
+# Robotic arm side (Hiwonder xArm 1S over USB)
+xarm==0.0.4
+hidapi          # provides the `hid` module xarm uses. Do NOT install the package named "hid".

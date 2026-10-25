@@ -1,0 +1,60 @@
+{
+  "_comment": "All servo positions are xArm units (0-1000, about 0.24 deg per unit). Limits come from RoboticArm/Vision-Guided-Robotic-System/Final Code. Verify every limit with the keyboard at low speed before using EMG.",
+
+  "arm": {
+    "connection": "USB",
+    "servos": {
+      "1": {"name": "gripper",      "min": 100, "max": 520},
+      "2": {"name": "wrist_rotate", "min": 450, "max": 550},
+      "4": {"name": "elbow",        "min": 450, "max": 920},
+      "5": {"name": "shoulder",     "min": 300, "max": 750},
+      "6": {"name": "base",         "min": 150, "max": 850}
+    },
+    "home": {"2": 500, "4": 820, "5": 700, "6": 500},
+    "home_min_duration_ms": 3000,
+
+    "gripper": {"servo": 1, "open": 100, "close": 510, "move_ms": 700},
+
+    "hard_max_speed_units_per_s": 300,
+    "default_speed_units_per_s": 100,
+    "control_period_ms": 25,
+    "command_duration_ms": 100,
+
+    "_stream_comment": "Smooth motion: a separate thread sends one packet every stream_period_ms, aiming lookahead_ms ahead. Raise lookahead_ms (e.g. 160) if motion still stutters; lower accel for softer starts.",
+    "stream_period_ms": 40,
+    "lookahead_ms": 120,
+    "accel_units_per_s2": 500,
+    "decel_units_per_s2": 1000,
+    "command_timeout_s": 0.25,
+
+    "min_battery_voltage": 6.6
+  },
+
+  "gestures": {
+    "left":  {"servo": 6, "direction": 1},
+    "right": {"servo": 6, "direction": -1},
+    "up":    {"servo": "vertical", "direction": 1},
+    "down":  {"servo": "vertical", "direction": -1}
+  },
+
+  "vertical_joints": {
+    "shoulder": {"servo": 5, "up_direction": 1},
+    "elbow":    {"servo": 4, "up_direction": -1}
+  },
+
+  "filter": {
+    "min_confidence": 0.65,
+    "vote_window": 5,
+    "stable_votes": 4,
+    "hold_votes": 3,
+    "dropout_grace_s": 0.3,
+    "grip_hold_s": 0.6,
+    "switch_hold_s": 1.8,
+    "grip_cooldown_s": 1.5,
+    "prediction_timeout_s": 0.3,
+    "emg_timeout_s": 0.3,
+    "max_continuous_move_s": 6.0,
+    "ramp_start": 0.5,
+    "ramp_time_s": 0.6
+  }
+}
