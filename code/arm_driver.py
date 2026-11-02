@@ -230,6 +230,28 @@ class SafeArm:
         self.homed = True
         return max(duration, self.home_min_ms) / 1000.0
 
+    def freeze(self):
+        """Stop every servo where it physically is right now, even in the middle
+        of a long move such as homing (halting the motion stream alone does not
+        stop those). The gripper is left alone: while it holds an object it sits
+        short of its target, and re-commanding that reading would loosen the grip.
+        Returns the positions that were read."""
+        with self._io_lock:
+            positions = {sid: self.backend.get_position(sid) for sid in self.limits if sid != self.grip_servo}
+            known = {sid: pos for sid, pos in positions.items() if pos is not None}
+            if known:
+                # The servos are already at these positions, so the speed-cap
+                # stretch on the duration cannot cause any real motion.
+                self._send_many_locked(known, 100)
+        return positions
+
+    def home_errors(self, tolerance=25):
+        """Servos that are not at the home pose: {servo: (position or None, home)}."""
+        with self._io_lock:
+            readings = {sid: self.backend.get_position(sid) for sid in self.home_pose}
+        return {sid: (pos, self.home_pose[sid]) for sid, pos in readings.items()
+                if pos is None or abs(pos - self.home_pose[sid]) > tolerance}
+
     def setpoint(self, servo_id):
         """Float position the motion streamer is tracking for this servo."""
         servo_id = int(servo_id)

@@ -12,6 +12,10 @@ import argparse
 import sys
 import time
 
+import env_bootstrap
+
+env_bootstrap.ensure()  # sets up / switches to the project's .venv if needed
+
 from arm_driver import SafeArm, XArmBackend, load_config
 from motion import MotionStreamer
 

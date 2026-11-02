@@ -12,20 +12,29 @@ Loads a Random Forest model trained in ArmBand/BioWave, streams the armband
 Motion is streamed smoothly by motion.MotionStreamer in its own thread; the GUI
 only decides velocities. The arm only moves while ARMED. Space or Esc is an
 emergency stop at any time.
+
+Closing the app (window close, Cmd+Q, Ctrl+C, kill) first parks the arm: it
+moves slowly to the home pose, opens the gripper and is checked, then the app
+exits. Space/Esc stops the parking move.
 """
 
 import csv
 import json
 import os
+import signal
 import sys
 import time
+import traceback
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-THESIS_ROOT = PROJECT_ROOT.parent
-ARMBAND_CODE = THESIS_ROOT / "ArmBand" / "code"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(1, str(ARMBAND_CODE))
+
+import env_bootstrap  # noqa: E402  sets up / switches to the project's .venv if needed
+
+env_bootstrap.ensure()
+
+import warnings  # noqa: E402
 
 import joblib
 import numpy as np
@@ -41,7 +50,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app_theme import apply_dark_theme, themed_button_style, themed_label_style
-from mouse import (
+from armband_link import (
     DEFAULT_ACCESS_KEY, WIFI_STREAM_PORT, ControlProtocol, DeviceInfo,
     InferenceWorker, SerialWorker, USBProvisionDialog,
     WirelessStreamWorker, get_local_ip_for_target,
@@ -51,9 +60,24 @@ from arm_driver import ArmSafetyError, SafeArm, SimulatedBackend, XArmBackend, l
 from motion import MotionStreamer
 from teleop import GestureFilter, Teleop, canonical_gesture
 
-TRAINED_MODEL_DIR = THESIS_ROOT / "ArmBand" / "trained_model"
+try:
+    # Models saved with a slightly different scikit-learn version still work; don't nag.
+    from sklearn.exceptions import InconsistentVersionWarning
+    warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
+except ImportError:
+    pass
+
+TRAINED_MODEL_DIR = PROJECT_ROOT / "models"
 LOG_DIR = PROJECT_ROOT / "logs"
 SAMPLE_RATE = 500
+
+
+def console(message):
+    """print() that never raises (the terminal may be gone, e.g. after SIGHUP)."""
+    try:
+        print(message, flush=True)
+    except (OSError, ValueError):
+        pass
 
 # Several keys can be held at once (e.g. base + shoulder together).
 KEY_MOTIONS = {Qt.Key_Left: "left", Qt.Key_Right: "right", Qt.Key_Up: "up", Qt.Key_Down: "down",
@@ -183,6 +207,9 @@ class EmgArmWindow(QMainWindow):
         self.gesture_filter = GestureFilter(config["filter"])
         self.teleop = None
         self.home_busy_until = 0.0
+        self.parking = None          # None / "home" / "gripper" while parking before exit
+        self.park_aborted = False
+        self.close_ready = False
         self.pressed_keys = {}
         self.key_grip_pending = False
         self.last_motion_t = 0.0
@@ -778,7 +805,7 @@ class EmgArmWindow(QMainWindow):
             try:
                 self.streamer.halt()  # stop where it is, right now
             except Exception as exc:
-                print(f"Halt failed: {exc}")
+                console(f"Halt failed: {exc}")
         if self.teleop and self.teleop.armed:
             self.teleop.armed = False
             self.log("disarmed", note=reason)
@@ -791,6 +818,20 @@ class EmgArmWindow(QMainWindow):
         self.update_controls()
 
     def emergency_stop(self, reason):
+        homing = time.monotonic() < self.home_busy_until
+        parking = self.parking is not None
+        self.parking = None
+        if parking:
+            self.park_aborted = True
+            reason += ". Parking stopped, the arm holds here. Close again to park or exit"
+        if self.arm and (homing or parking):
+            # Homing/parking is one long servo command: stop it where the arm is now.
+            try:
+                self.arm.freeze()
+            except Exception as exc:
+                console(f"Freeze failed: {exc}")
+            self.home_busy_until = 0.0
+            self.refresh_servo_view()
         self.disarm(f"STOPPED: {reason}")
         self.action_label.setText("ACTION: STOPPED")
 
@@ -813,21 +854,23 @@ class EmgArmWindow(QMainWindow):
     def update_controls(self):
         armed = bool(self.teleop and self.teleop.armed)
         connected = self.arm is not None
-        homing = time.monotonic() < self.home_busy_until
+        homing = time.monotonic() < self.home_busy_until or self.parking is not None
         self.simulate_check.setEnabled(not connected)
         self.home_button.setEnabled(connected and not armed and not homing)
         self.grip_open_button.setEnabled(connected and self.arm.homed and not homing)
         self.grip_close_button.setEnabled(connected and self.arm.homed and not homing)
-        self.arm_toggle.setEnabled(armed or self.can_arm())
+        self.arm_toggle.setEnabled((armed or self.can_arm()) and self.parking is None)
         self.arm_toggle.setText("DISARM" if armed else "ARM (enable motion)")
         self.arm_toggle.setStyleSheet(themed_button_style("muted" if armed else "success"))
         simulated = connected and isinstance(self.arm.backend, SimulatedBackend)
-        if armed and simulated:
+        if self.parking:
+            self.state_label.setText("PARKING ARM, THEN CLOSING  (Space/Esc = stop)")
+        elif armed and simulated:
             self.state_label.setText("ARMED — SIMULATION ONLY (real arm will not move)")
         else:
             self.state_label.setText("ARMED — ARM WILL MOVE" if armed else "DISARMED")
-        self.state_label.setStyleSheet(
-            f"font-size: 22px; font-weight: 800; color: {'#F43F5E' if armed else '#94A3B8'};")
+        color = "#FBBF24" if self.parking else ("#F43F5E" if armed else "#94A3B8")
+        self.state_label.setStyleSheet(f"font-size: 22px; font-weight: 800; color: {color};")
 
     # ========================================================== keyboard
     def handle_key(self, event, pressed):
@@ -946,19 +989,103 @@ class EmgArmWindow(QMainWindow):
 
     # ============================================================= close
     def closeEvent(self, event):
-        self.disarm("Closing")
-        if self.arm and self.arm.homed and not isinstance(self.arm.backend, SimulatedBackend):
+        if self.close_ready:
+            self.shutdown()
+            event.accept()
+            return
+        event.ignore()  # park first; finish_close() closes the window afterwards
+        if self.parking:
+            self.note_label.setText("Parking the arm before exit… (Space/Esc stops it)")
+            return
+        if not (self.arm and self.config["arm"].get("park_on_exit", True)):
+            self.finish_close()
+            return
+        if self.park_aborted:
             answer = QMessageBox.question(
-                self, "Exit", "Move the arm home before exiting?\n(Recommended: it rests in a safe pose.)",
+                self, "Exit",
+                "Parking was stopped.\n\nYes: park the arm at home now, then exit.\n"
+                "No: exit and leave the arm holding where it is.",
                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
             if answer == QMessageBox.Cancel:
-                event.ignore()
                 return
-            if answer == QMessageBox.Yes:
-                try:
-                    time.sleep(self.arm.go_home())
-                except Exception as exc:
-                    print(f"Home on exit failed: {exc}")
+            if answer == QMessageBox.No:
+                self.finish_close()
+                return
+        self.start_parking()
+
+    # ------------------------------------------------- park before exit
+    def start_parking(self):
+        self.parking = "home"
+        self.park_aborted = False
+        self.disarm("Closing: parking the arm at home first (Space/Esc stops it)")
+        try:
+            seconds = self.arm.go_home()
+        except Exception as exc:
+            self.log("park", note=f"failed: {exc}")
+            console(f"Parking failed: {exc}")
+            self.parking = None
+            QMessageBox.critical(self, "Parking failed",
+                                 f"Could not move the arm home before exiting:\n{exc}\n\n"
+                                 "The app will close and the arm keeps holding its pose.")
+            self.finish_close()
+            return
+        real = not isinstance(self.arm.backend, SimulatedBackend)
+        wait = seconds + 0.3 if real else 0.2
+        self.home_busy_until = time.monotonic() + wait
+        self.arm_status.setText(f"ARM: parking at home ({seconds:.1f} s)…")
+        self.log("park", note=f"home {seconds:.1f}s")
+        self.refresh_servo_view()
+        self.update_controls()
+        QTimer.singleShot(int(wait * 1000), self.park_open_gripper)
+
+    def park_open_gripper(self):
+        if self.parking != "home":
+            return  # stopped by Space/Esc
+        self.home_busy_until = 0.0
+        if not (self.config["arm"].get("open_gripper_on_exit", True) and self.arm.gripper_closed is not False):
+            self.park_done()
+            return
+        self.parking = "gripper"
+        try:
+            self.arm.set_gripper(False)
+        except Exception as exc:
+            console(f"Opening the gripper failed: {exc}")
+            self.park_done()
+            return
+        self.log("park", note="gripper opened")
+        self.refresh_servo_view()
+        real = not isinstance(self.arm.backend, SimulatedBackend)
+        # The speed cap can stretch the gripper move beyond grip_ms; wait for all of it.
+        travel_ms = abs(self.arm.grip_close - self.arm.grip_open) / self.arm.hard_max_speed * 1000
+        QTimer.singleShot(int(max(self.arm.grip_ms, travel_ms)) + 200 if real else 100, self.park_done)
+
+    def park_done(self):
+        if self.parking is None:
+            return  # stopped by Space/Esc
+        self.parking = None
+        errors = {}
+        if not isinstance(self.arm.backend, SimulatedBackend):
+            try:
+                errors = self.arm.home_errors()
+            except Exception as exc:
+                console(f"Could not check the home pose: {exc}")
+        if errors:
+            detail = "\n".join(f"  {self.arm.names[sid]} (servo {sid}): at {pos if pos is not None else '?'}, "
+                                f"home is {home}" for sid, (pos, home) in sorted(errors.items()))
+            self.log("park", note=f"not at home: {errors}")
+            console("Arm did not fully reach home:\n" + detail)
+            QMessageBox.warning(self, "Arm not fully parked",
+                                "The arm did not fully reach its home pose:\n" + detail +
+                                "\n\nSomething may be blocking it. The app will now close.")
+        else:
+            self.log("park", note="at home")
+        self.finish_close()
+
+    def finish_close(self):
+        self.close_ready = True
+        self.close()
+
+    def shutdown(self):
         self.control_timer.stop()
         self.battery_timer.stop()
         if self.streamer:
@@ -966,9 +1093,8 @@ class EmgArmWindow(QMainWindow):
         if self.emg_connected:
             self.disconnect_emg()
         if self.arm:
-            self.disconnect_arm()
+            self.disconnect_arm()  # torque stays on: the arm keeps holding its pose
         self.inference_worker.stop()
-        event.accept()
 
 
 def main():
@@ -977,6 +1103,30 @@ def main():
     app = QApplication(sys.argv)
     apply_dark_theme(app, font_size=14)
     window = EmgArmWindow(config)
+
+    # Ctrl+C, `kill` or closing the terminal go through closeEvent too, so the
+    # arm is parked first. (Python only runs signal handlers while it executes
+    # Python code, hence the idle timer.)
+    def request_close(*_):
+        QTimer.singleShot(0, window.close)
+    for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), request_close)
+    signal_timer = QTimer()
+    signal_timer.timeout.connect(lambda: None)
+    signal_timer.start(200)
+
+    # An unexpected error must not kill the app (PyQt would abort, skipping the
+    # parking): stop motion, report it, and keep the window open.
+    def on_error(etype, value, tb):
+        console("".join(traceback.format_exception(etype, value, tb)))
+        try:
+            window.log("error", note=f"{etype.__name__}: {value}")
+            window.emergency_stop(f"Internal error ({etype.__name__}: {value})")
+        except Exception:
+            pass
+    sys.excepthook = on_error
+
     key_filter = KeyboardFilter(window)
     app.installEventFilter(key_filter)
     app.applicationStateChanged.connect(
