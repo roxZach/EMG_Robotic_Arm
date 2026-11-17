@@ -1,13 +1,15 @@
 """EMG armband simulator (copied from ArmBand/code). Streams fake EMG over TCP
 so the arm app can be tested with no armband: choose "Simulator (local)".
+
+    python3 tools/emg_simulator.py
 """
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # project root, for emg_arm
 
-import env_bootstrap  # noqa: E402
+from emg_arm import env_bootstrap  # noqa: E402
 
 env_bootstrap.ensure()
 
@@ -34,7 +36,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from app_theme import apply_dark_theme, themed_button_style
+from emg_arm.app.theme import apply_dark_theme, themed_button_style
 
 DEFAULT_BAUD_RATE = 921600
 DEFAULT_SAMPLE_RATE = 500

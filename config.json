@@ -20,14 +20,19 @@
     "control_period_ms": 25,
     "command_duration_ms": 100,
 
-    "_stream_comment": "Smooth motion: a separate thread sends one packet every stream_period_ms, aiming lookahead_ms ahead. Raise lookahead_ms (e.g. 160) if motion still stutters; lower accel for softer starts.",
+    "_stream_comment": "Smooth motion: a separate thread sends one packet every stream_period_ms, aiming lookahead_ms ahead. Raise lookahead_ms (e.g. 160) if motion still stutters; lower accel / jerk for softer starts and stops (slower to respond).",
     "stream_period_ms": 40,
     "lookahead_ms": 120,
     "accel_units_per_s2": 500,
     "decel_units_per_s2": 1000,
+    "jerk_units_per_s3": 6000,
     "command_timeout_s": 0.25,
 
-    "min_battery_voltage": 6.6
+    "min_battery_voltage": 6.6,
+
+    "_exit_comment": "When the app closes, the arm first moves slowly to the home pose (the safe resting pose) and then opens the gripper, so its servo is not left squeezing an object.",
+    "park_on_exit": true,
+    "open_gripper_on_exit": true
   },
 
   "gestures": {

@@ -1,0 +1,12 @@
+              precision     recall   f1-score    support
+
+  Fist_Close     0.9250     0.9250     0.9250         40
+        Left     0.9412     0.9412     0.9412         34
+   Move_Down     0.9394     0.9118     0.9254         34
+     Move_Up     0.9091     0.8824     0.8955         34
+        Rest     0.8839     0.8919     0.8879        111
+       Right     0.9429     0.9706     0.9565         34
+
+    accuracy                           0.9129        287
+   macro avg     0.9236     0.9205     0.9219        287
+weighted avg     0.9130     0.9129     0.9129        287

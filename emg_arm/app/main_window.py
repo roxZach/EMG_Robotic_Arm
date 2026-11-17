@@ -1,4 +1,4 @@
-"""BioWave EMG -> Hiwonder xArm 1S gesture control.
+"""The main window: BioWave EMG -> Hiwonder xArm 1S gesture control.
 
 Loads a Random Forest model trained in ArmBand/BioWave, streams the armband
 (Wi-Fi, USB serial, or the simulator), and maps gestures to arm motion:
@@ -8,6 +8,8 @@ Loads a Random Forest model trained in ArmBand/BioWave, streams the armband
     Fist (hold)    -> hold ~0.6 s and relax: toggle gripper (servo 1)
                       keep holding ~1.8 s: switch Up/Down between shoulder/elbow
     Rest           -> hold position
+
+That is the default, from each class's name; the Gesture Mapping button changes it.
 
 Motion is streamed smoothly by motion.MotionStreamer in its own thread; the GUI
 only decides velocities. The arm only moves while ARMED. Space or Esc is an
@@ -20,26 +22,14 @@ exits. Space/Esc stops the parking move.
 
 import csv
 import json
-import os
-import signal
-import sys
+import threading
 import time
-import traceback
+import warnings
 from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import env_bootstrap  # noqa: E402  sets up / switches to the project's .venv if needed
-
-env_bootstrap.ensure()
-
-import warnings  # noqa: E402
 
 import joblib
 import numpy as np
 import serial.tools.list_ports
-import threading
 
 from PyQt5.QtCore import QEvent, QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -49,16 +39,18 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from app_theme import apply_dark_theme, themed_button_style, themed_label_style
-from armband_link import (
+from emg_arm.app.gesture_mapping import GestureMappingDialog, class_training_stats
+from emg_arm.app.theme import themed_button_style, themed_label_style
+from emg_arm.arm.driver import ArmSafetyError, SafeArm, SimulatedBackend, XArmBackend
+from emg_arm.arm.gesture_control import (
+    GESTURE_MAPPING_FILE, GestureFilter, Teleop, load_gesture_mapping, save_gesture_mapping,
+)
+from emg_arm.arm.motion import MotionStreamer
+from emg_arm.armband.link import (
     DEFAULT_ACCESS_KEY, WIFI_STREAM_PORT, ControlProtocol, DeviceInfo,
     InferenceWorker, SerialWorker, USBProvisionDialog,
     WirelessStreamWorker, get_local_ip_for_target,
 )
-
-from arm_driver import ArmSafetyError, SafeArm, SimulatedBackend, XArmBackend, load_config
-from motion import MotionStreamer
-from teleop import GestureFilter, Teleop, canonical_gesture
 
 try:
     # Models saved with a slightly different scikit-learn version still work; don't nag.
@@ -67,6 +59,7 @@ try:
 except ImportError:
     pass
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TRAINED_MODEL_DIR = PROJECT_ROOT / "models"
 LOG_DIR = PROJECT_ROOT / "logs"
 SAMPLE_RATE = 500
@@ -185,6 +178,8 @@ class EmgArmWindow(QMainWindow):
 
         # Armband / model state
         self.model_loaded = False
+        self.model_path = None
+        self.model_classes = []
         self.emg_connected = False
         self.worker = None
         self.keepalive_worker = None
@@ -251,8 +246,13 @@ class EmgArmWindow(QMainWindow):
         load.clicked.connect(self.load_model)
         self.model_label = QLabel("No model loaded")
         self.model_label.setStyleSheet(themed_label_style("muted"))
+        self.model_label.setWordWrap(True)
+        self.mapping_button = QPushButton("Gesture Mapping")
+        self.mapping_button.setStyleSheet(themed_button_style("accent"))
+        self.mapping_button.clicked.connect(self.open_gesture_mapping)
         bl.addWidget(load, 0, 0)
-        bl.addWidget(self.model_label, 0, 1, 1, 3)
+        bl.addWidget(self.model_label, 0, 1, 1, 2)
+        bl.addWidget(self.mapping_button, 0, 3)
 
         self.connection_mode = QComboBox()
         self.connection_mode.addItem("Wireless Wi-Fi (ESP32)", "wireless")
@@ -392,7 +392,7 @@ class EmgArmWindow(QMainWindow):
             "  ← →  base     ↑ ↓  selected joint (1/2 = shoulder/elbow)\n"
             "  W S  shoulder     E D  elbow     G  toggle gripper\n"
             "  Space or Esc  EMERGENCY STOP\n"
-            "EMG: fist ~0.6 s + relax = gripper, hold ~1.8 s = switch joint")
+            "EMG: grip gesture ~0.6 s + relax = gripper, hold ~1.8 s = switch joint")
         keys.setStyleSheet("font-size: 12px; color: #94A3B8;")
         cl.addWidget(keys)
         cl.addStretch(1)
@@ -489,7 +489,7 @@ class EmgArmWindow(QMainWindow):
         try:
             artifact = joblib.load(path)
             model = artifact["model"]
-            classes = list(artifact["class_names"])
+            classes = [str(c) for c in artifact["class_names"]]
             input_channels = artifact.get("input_channels")
             if input_channels is None:
                 input_channels = {70: 4, 156: 8, 231: 11}.get(getattr(model, "n_features_in_", 0), 4)
@@ -497,14 +497,9 @@ class EmgArmWindow(QMainWindow):
             QMessageBox.critical(self, "Model Error", f"Could not load the model:\n{exc}")
             return
 
-        mapping = {c: canonical_gesture(c) for c in classes}
+        mapping = load_gesture_mapping(Path(path).with_name(GESTURE_MAPPING_FILE), classes)
         unknown = [c for c, g in mapping.items() if g is None]
         missing = [g for g in ("left", "right", "up", "down", "grip", "rest") if g not in mapping.values()]
-        if "switch" in mapping.values():
-            # A dedicated switch gesture exists: the fist toggles the gripper at once.
-            self.gesture_filter.switch_hold_s = 0.0
-        else:
-            self.gesture_filter.switch_hold_s = float(self.config["filter"].get("switch_hold_s", 0.0))
         if self.emg_connected:
             self.disconnect_emg()  # buffer sizes change with the model
         self.disarm("Model changed")
@@ -514,10 +509,10 @@ class EmgArmWindow(QMainWindow):
         self.data_buffer = np.zeros((self.num_channels, self.window_samples), dtype=np.float32)
         self.baseline = np.zeros(self.num_channels, dtype=np.float32)
         self.inference_worker.load_model(model, classes)
-        self.gesture_filter.reset()
+        self.model_path = Path(path)
+        self.model_classes = classes
         self.model_loaded = True
-        text = f"{Path(path).parent.name}  |  " + ", ".join(f"{c}→{mapping[c] or 'ignored'}" for c in classes)
-        self.model_label.setText(text)
+        self.apply_gesture_mapping(mapping)
         self.model_label.setStyleSheet(themed_label_style("success"))
         if "rest" in missing:
             QMessageBox.warning(self, "No Rest class",
@@ -528,6 +523,31 @@ class EmgArmWindow(QMainWindow):
                                     f"Not in this model: {', '.join(missing) or 'none'}\n"
                                     f"Ignored classes: {', '.join(unknown) or 'none'}")
         self.update_controls()
+
+    def apply_gesture_mapping(self, mapping):
+        self.gesture_filter.label_map = mapping
+        if "switch" in mapping.values():
+            # A dedicated switch gesture exists: the grip toggles the gripper at once.
+            self.gesture_filter.switch_hold_s = 0.0
+        else:
+            self.gesture_filter.switch_hold_s = float(self.config["filter"].get("switch_hold_s", 0.0))
+        self.gesture_filter.reset()
+        self.model_label.setText(f"{self.model_path.parent.name}  |  " + ", ".join(
+            f"{c}→{mapping[c] or 'ignored'}" for c in self.model_classes))
+
+    def open_gesture_mapping(self):
+        stats = class_training_stats(self.model_path.with_name("training_results.json"), self.model_classes)
+        dialog = GestureMappingDialog(self.model_classes, self.gesture_filter.label_map, stats, self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        mapping = dialog.mapping()
+        self.apply_gesture_mapping(mapping)
+        self.log("gesture_mapping", note=str(mapping))
+        try:
+            save_gesture_mapping(self.model_path.with_name(GESTURE_MAPPING_FILE), mapping)
+        except OSError as exc:
+            QMessageBox.warning(self, "Gesture Mapping",
+                                f"The mapping is active but could not be saved for next time:\n{exc}")
 
     def toggle_emg(self):
         if self.emg_connected:
@@ -856,6 +876,8 @@ class EmgArmWindow(QMainWindow):
         connected = self.arm is not None
         homing = time.monotonic() < self.home_busy_until or self.parking is not None
         self.simulate_check.setEnabled(not connected)
+        # Disarmed only: Space/Esc E-STOP does not reach the main window while a dialog has focus.
+        self.mapping_button.setEnabled(self.model_loaded and not armed)
         self.home_button.setEnabled(connected and not armed and not homing)
         self.grip_open_button.setEnabled(connected and self.arm.homed and not homing)
         self.grip_close_button.setEnabled(connected and self.arm.homed and not homing)
@@ -1083,7 +1105,9 @@ class EmgArmWindow(QMainWindow):
 
     def finish_close(self):
         self.close_ready = True
-        self.close()
+        # Deferred: Qt ignores close() called from inside closeEvent, which is
+        # where this runs when there is nothing to park.
+        QTimer.singleShot(0, self.close)
 
     def shutdown(self):
         self.control_timer.stop()
@@ -1095,45 +1119,3 @@ class EmgArmWindow(QMainWindow):
         if self.arm:
             self.disconnect_arm()  # torque stays on: the arm keeps holding its pose
         self.inference_worker.stop()
-
-
-def main():
-    config_path = sys.argv[1] if len(sys.argv) > 1 else None
-    config = load_config(config_path)
-    app = QApplication(sys.argv)
-    apply_dark_theme(app, font_size=14)
-    window = EmgArmWindow(config)
-
-    # Ctrl+C, `kill` or closing the terminal go through closeEvent too, so the
-    # arm is parked first. (Python only runs signal handlers while it executes
-    # Python code, hence the idle timer.)
-    def request_close(*_):
-        QTimer.singleShot(0, window.close)
-    for name in ("SIGINT", "SIGTERM", "SIGHUP"):
-        if hasattr(signal, name):
-            signal.signal(getattr(signal, name), request_close)
-    signal_timer = QTimer()
-    signal_timer.timeout.connect(lambda: None)
-    signal_timer.start(200)
-
-    # An unexpected error must not kill the app (PyQt would abort, skipping the
-    # parking): stop motion, report it, and keep the window open.
-    def on_error(etype, value, tb):
-        console("".join(traceback.format_exception(etype, value, tb)))
-        try:
-            window.log("error", note=f"{etype.__name__}: {value}")
-            window.emergency_stop(f"Internal error ({etype.__name__}: {value})")
-        except Exception:
-            pass
-    sys.excepthook = on_error
-
-    key_filter = KeyboardFilter(window)
-    app.installEventFilter(key_filter)
-    app.applicationStateChanged.connect(
-        lambda state: state != Qt.ApplicationActive and window.pressed_keys.clear())
-    window.show()
-    sys.exit(app.exec_())
-
-
-if __name__ == "__main__":
-    main()

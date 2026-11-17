@@ -1,8 +1,8 @@
 """Read-only xArm check: battery voltage and servo positions vs. config limits.
 
-    python code/check_arm.py                 # read only, the arm does not move
-    python code/check_arm.py --nudge 6       # move servo 6 by +30 units and back, slowly
-    python code/check_arm.py --glide 6       # smooth streamed move +80 and back (tests smoothness)
+    python3 tools/check_arm.py               # read only, the arm does not move
+    python3 tools/check_arm.py --nudge 6     # move servo 6 by +30 units and back, slowly
+    python3 tools/check_arm.py --glide 6     # smooth streamed move +80 and back (tests smoothness)
 
 Use --nudge on each joint (6, 5, 4) to confirm which way "+" goes before
 setting the directions in config.json.
@@ -11,13 +11,16 @@ setting the directions in config.json.
 import argparse
 import sys
 import time
+from pathlib import Path
 
-import env_bootstrap
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # project root, for emg_arm
+
+from emg_arm import env_bootstrap  # noqa: E402
 
 env_bootstrap.ensure()  # sets up / switches to the project's .venv if needed
 
-from arm_driver import SafeArm, XArmBackend, load_config
-from motion import MotionStreamer
+from emg_arm.arm.driver import SafeArm, XArmBackend, load_config  # noqa: E402
+from emg_arm.arm.motion import MotionStreamer  # noqa: E402
 
 NUDGE = 30
 GLIDE = 80

@@ -27,7 +27,7 @@ import math
 import threading
 import time
 
-from arm_driver import MIN_WRITE_GAP_S, ArmSafetyError
+from emg_arm.arm.driver import MIN_WRITE_GAP_S, ArmSafetyError
 
 
 def _approach(value, goal, max_delta):

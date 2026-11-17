@@ -1,0 +1,21 @@
+{
+  "created_at_text": "2026-11-01 09:43:55",
+  "dataset_paths": [
+    "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/dataset/jiam_robo_right_2_20261101_094236/emg_data_jiam_robo_right_2_20261101_094236.csv",
+    "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/dataset/jiam_robo_right_1_20261101_093306/emg_data_jiam_robo_right_1_20261101_093306.csv"
+  ],
+  "output_dir": "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/trained_model",
+  "run_name": "jiam_robo_right_2",
+  "window_ms": 200,
+  "stride_ms": 50,
+  "window_samples": 100,
+  "stride_samples": 25,
+  "n_estimators": 150,
+  "max_depth": 16,
+  "test_size": 0.2,
+  "random_seed": 42,
+  "class_weight_balanced": true,
+  "auto_load_model": true,
+  "sample_rate_hz": 500,
+  "input_channels": 11
+}

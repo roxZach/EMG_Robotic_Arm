@@ -6,7 +6,7 @@ requirements.txt into it. That happens once, takes a few minutes and needs
 internet. Later runs start immediately. If requirements.txt changes, the next
 run updates `.venv` by itself.
 
-Start a script with any Python 3.11+ (`python3 code/emg_arm_control.py`, the VS
+Start a script with any Python 3.11+ (`python3 main.py`, the VS
 Code Run button, ...). It restarts itself inside `.venv` with the same
 arguments. Set EMG_ARM_NO_BOOTSTRAP=1 to skip all of this and use the
 current Python as it is.

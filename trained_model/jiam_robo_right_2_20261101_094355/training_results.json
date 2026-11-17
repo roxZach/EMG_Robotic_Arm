@@ -1,0 +1,138 @@
+{
+  "created_at_text": "2026-11-01 09:43:55",
+  "accuracy": 0.7748117727583846,
+  "train_windows": 5716,
+  "test_windows": 1461,
+  "num_features": 231,
+  "classes": [
+    "Left",
+    "Rest",
+    "Right",
+    "down",
+    "fist_close",
+    "up"
+  ],
+  "class_window_counts": {
+    "Left": 843,
+    "Rest": 2848,
+    "Right": 823,
+    "down": 877,
+    "fist_close": 904,
+    "up": 882
+  },
+  "segment_count_by_file": {
+    "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/dataset/jiam_robo_right_2_20261101_094236/emg_data_jiam_robo_right_2_20261101_094236.csv": 50,
+    "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/dataset/jiam_robo_right_1_20261101_093306/emg_data_jiam_robo_right_1_20261101_093306.csv": 100
+  },
+  "channel_count_by_file": {
+    "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/dataset/jiam_robo_right_2_20261101_094236/emg_data_jiam_robo_right_2_20261101_094236.csv": 11,
+    "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/dataset/jiam_robo_right_1_20261101_093306/emg_data_jiam_robo_right_1_20261101_093306.csv": 11
+  },
+  "input_channels": 11,
+  "skipped_channel_segments": 0,
+  "confusion_matrix": [
+    [
+      92,
+      14,
+      3,
+      0,
+      0,
+      0
+    ],
+    [
+      3,
+      447,
+      11,
+      6,
+      6,
+      0
+    ],
+    [
+      0,
+      48,
+      88,
+      0,
+      0,
+      32
+    ],
+    [
+      13,
+      73,
+      0,
+      289,
+      1,
+      1
+    ],
+    [
+      0,
+      33,
+      0,
+      3,
+      74,
+      0
+    ],
+    [
+      0,
+      28,
+      54,
+      0,
+      0,
+      142
+    ]
+  ],
+  "classification_report_text": "              precision     recall   f1-score    support\n\n        Left     0.8519     0.8440     0.8479        109\n        Rest     0.6952     0.9450     0.8011        473\n       Right     0.5641     0.5238     0.5432        168\n        down     0.9698     0.7666     0.8563        377\n  fist_close     0.9136     0.6727     0.7749        110\n          up     0.8114     0.6339     0.7118        224\n\n    accuracy                           0.7748       1461\n   macro avg     0.8010     0.7310     0.7559       1461\nweighted avg     0.7969     0.7748     0.7735       1461",
+  "classification_report_dict": {
+    "Left": {
+      "precision": 0.8518518518518519,
+      "recall": 0.8440366972477065,
+      "f1-score": 0.847926267281106,
+      "support": 109.0
+    },
+    "Rest": {
+      "precision": 0.6951788491446346,
+      "recall": 0.945031712473573,
+      "f1-score": 0.8010752688172043,
+      "support": 473.0
+    },
+    "Right": {
+      "precision": 0.5641025641025641,
+      "recall": 0.5238095238095238,
+      "f1-score": 0.5432098765432098,
+      "support": 168.0
+    },
+    "down": {
+      "precision": 0.9697986577181208,
+      "recall": 0.76657824933687,
+      "f1-score": 0.8562962962962963,
+      "support": 377.0
+    },
+    "fist_close": {
+      "precision": 0.9135802469135802,
+      "recall": 0.6727272727272727,
+      "f1-score": 0.774869109947644,
+      "support": 110.0
+    },
+    "up": {
+      "precision": 0.8114285714285714,
+      "recall": 0.6339285714285714,
+      "f1-score": 0.7117794486215538,
+      "support": 224.0
+    },
+    "accuracy": 0.7748117727583846,
+    "macro avg": {
+      "precision": 0.800990123526554,
+      "recall": 0.7310186711705863,
+      "f1-score": 0.7558593779178358,
+      "support": 1461.0
+    },
+    "weighted avg": {
+      "precision": 0.7969258038239014,
+      "recall": 0.7748117727583846,
+      "f1-score": 0.7735042620346407,
+      "support": 1461.0
+    }
+  },
+  "model_file": "rf_realtime_model.joblib",
+  "run_dir": "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/trained_model/jiam_robo_right_2_20261101_094355",
+  "model_path": "/Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/trained_model/jiam_robo_right_2_20261101_094355/rf_realtime_model.joblib"
+}

@@ -5,11 +5,11 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "code"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from arm_driver import ArmSafetyError, SafeArm, SimulatedBackend, load_config  # noqa: E402
-from motion import MotionStreamer  # noqa: E402
-from teleop import GestureFilter, Teleop, canonical_gesture  # noqa: E402
+from emg_arm.arm.driver import ArmSafetyError, SafeArm, SimulatedBackend, load_config  # noqa: E402
+from emg_arm.arm.gesture_control import GestureFilter, Teleop, canonical_gesture  # noqa: E402
+from emg_arm.arm.motion import MotionStreamer  # noqa: E402
 
 CONFIG = load_config()
 
@@ -249,6 +249,35 @@ class StreamerTests(unittest.TestCase):
         self.assertFalse(self.streamer.is_moving())
         self.assertEqual(self.arm.targets[6], round(self.arm.setpoint(6)),
                          "last packet parks the servo on its setpoint")
+
+    def test_s_curve_has_no_kick(self):
+        """Acceleration builds up and dies away gradually (jerk limit), on
+        start, release and reversal, and the speed never overshoots."""
+        speeds = []
+        t = 0.0
+        for vel, seconds in (({6: 100}, 1.0), ({}, 0.5), ({6: 100}, 0.6), ({6: -100}, 1.0)):
+            for _ in range(int(round(seconds / 0.04))):
+                self.streamer.command(vel, t)
+                t += 0.04
+                self.streamer.step(0.04, t)
+                speeds.append(self.streamer._vel.get(6, 0.0))
+        accels = [(b - a) / 0.04 for a, b in zip([0.0] + speeds, speeds)]
+        jerk_step = self.streamer.jerk * 0.04
+        for a, b in zip([0.0] + accels, accels):
+            # 20 % slack: the cycle that lands on the goal speed is shortened.
+            self.assertLessEqual(abs(b - a), 1.2 * jerk_step)
+        self.assertLessEqual(max(abs(s) for s in speeds), 100.0)
+
+    def test_glides_into_soft_limit(self):
+        self.arm.set_speed(300)
+        t = 0.0
+        speed = 0.0
+        while not self.arm.at_limit(6, 1) and t < 5.0:
+            speed = self.streamer._vel.get(6, 0.0)
+            t = run_stream(self.streamer, {6: 300}, 0.04, t0=t)
+        self.assertTrue(self.arm.at_limit(6, 1))
+        self.assertLess(speed, 30, "slowed down before reaching the limit")
+        self.assertLessEqual(self.arm.targets[6], 850)
 
     def test_halt_parks_immediately(self):
         run_stream(self.streamer, {6: 100}, 1.0)

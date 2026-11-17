@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
 )
 
 try:
-    from rf_features import extract_window_features
+    from emg_arm.armband.features import extract_window_features
     HAS_RF = True
 except ImportError:
     HAS_RF = False

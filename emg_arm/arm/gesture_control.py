@@ -3,10 +3,14 @@
 Pure Python (no Qt) so the safety logic can be unit-tested.
 """
 
+import json
 import re
 from collections import Counter, deque
+from pathlib import Path
 
 MOTIONS = ("left", "right", "up", "down")
+ACTIONS = MOTIONS + ("grip", "switch", "rest")
+GESTURE_MAPPING_FILE = "gesture_mapping.json"  # saved next to each model
 
 
 def canonical_gesture(label):
@@ -25,6 +29,26 @@ def canonical_gesture(label):
         if name in words:
             return name
     return None
+
+
+def load_gesture_mapping(path, classes):
+    """{class: action} for a model, None meaning ignored. Uses the choices saved in
+    `path`; a class with no valid saved choice gets the name-based guess."""
+    try:
+        saved = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    if not isinstance(saved, dict):
+        saved = {}
+    mapping = {}
+    for name in classes:
+        choice = saved.get(name, "")
+        mapping[name] = choice if choice is None or choice in ACTIONS else canonical_gesture(name)
+    return mapping
+
+
+def save_gesture_mapping(path, mapping):
+    Path(path).write_text(json.dumps(mapping, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 class GestureFilter:
@@ -49,6 +73,7 @@ class GestureFilter:
         self.grace_s = float(cfg.get("dropout_grace_s", 0.0))
         self.timeout_s = float(cfg["prediction_timeout_s"])
         self.max_move_s = float(cfg["max_continuous_move_s"])
+        self.label_map = {}  # {class: action} chosen in the app, kept across reset()
         self.reset()
 
     def reset(self):
@@ -64,8 +89,11 @@ class GestureFilter:
         self.locked_out = False
         self._dropped = None  # (motion, since, locked_out, when) for the flicker grace
 
+    def action_for(self, label):
+        return self.label_map[label] if label in self.label_map else canonical_gesture(label)
+
     def add_prediction(self, label, confidence, now):
-        gesture = canonical_gesture(label) if confidence >= self.min_conf else None
+        gesture = self.action_for(label) if confidence >= self.min_conf else None
         self.history.append(gesture)
         self.last_prediction_t = now
         counts = Counter(g for g in self.history if g is not None)
@@ -139,15 +167,15 @@ class GestureFilter:
         return True
 
     def grip_hint(self, now):
-        """Short guidance while a fist is held, for the Live panel."""
+        """Short guidance while the grip gesture is held, for the Live panel."""
         if self.stable != "grip" or not self.is_fresh(now) or self.switch_fired:
             return ""
         held = self.held_for(now)
         if self.switch_hold_s <= 0:
-            return "" if self.grip_fired else f"Fist {held:.1f}/{self.grip_hold_s:.1f} s → gripper"
+            return "" if self.grip_fired else f"Grip {held:.1f}/{self.grip_hold_s:.1f} s → gripper"
         if held < self.grip_hold_s:
-            return f"Fist {held:.1f} s…"
-        return f"Fist {held:.1f} s: RELAX now = gripper, keep holding to {self.switch_hold_s:.1f} s = switch joint"
+            return f"Grip {held:.1f} s…"
+        return f"Grip {held:.1f} s: RELAX now = gripper, keep holding to {self.switch_hold_s:.1f} s = switch joint"
 
 
 class Teleop:

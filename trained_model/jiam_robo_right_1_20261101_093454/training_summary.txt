@@ -1,0 +1,8 @@
+Run Folder: /Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/trained_model/jiam_robo_right_1_20261101_093454
+Model File: /Users/ibnajiam/Documents/Study/Thesis/EMG_Robotic_Arm/trained_model/jiam_robo_right_1_20261101_093454/rf_realtime_model.joblib
+Datasets: 1 file(s)
+Accuracy: 0.6782
+Train windows: 3861 | Test windows: 979
+Window: 200 ms (100 samples) | Stride: 50 ms (25 samples)
+Input channels: 11
+Classes: Left, Rest, Right, down, fist_close, up
